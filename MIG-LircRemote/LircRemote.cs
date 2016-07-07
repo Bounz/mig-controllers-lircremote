@@ -71,7 +71,7 @@ namespace MIG.Interfaces.Controllers
         private extern static int lirc_init(string prog, int verbose);
 
         [DllImport("lirc_client")]
-        private extern static int LircDeinit();
+        private extern static int lirc_deinit();
 
         [DllImport("lirc_client")]
         private extern static int lirc_nextcode(out string code);
@@ -80,7 +80,7 @@ namespace MIG.Interfaces.Controllers
         private extern static int lirc_readconfig(IntPtr file, out IntPtr config, IntPtr check);
 
         [DllImport("lirc_client")]
-        private extern static int LircFreeConfig(IntPtr config);
+        private extern static int lirc_freeconfig(IntPtr config);
 
         [DllImport("lirc_client")]
         private extern static int lirc_code2char(IntPtr config, string code, out string str);
@@ -89,6 +89,7 @@ namespace MIG.Interfaces.Controllers
 
         #region Private fields
 
+		private string assemblyFolder = "";
         private string programName = "homegenie";
         private bool isConnected;
         private Thread lircListener;
@@ -152,7 +153,25 @@ namespace MIG.Interfaces.Controllers
             {
                 try
                 {
-                    if (lirc_init(programName, 1) == -1)
+					// create .lircrc file
+					var lircrcFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".lircrc");
+					//Console.WriteLine("LIRC HomeGenie configurations file '{0}'", lircrcFile);
+					if (!File.Exists(lircrcFile))
+					{
+						var lircrc = "begin\n" +
+							"        prog = homegenie\n" +
+							"end\n";
+						try
+						{
+							File.WriteAllText(lircrcFile, lircrc);
+						}
+						catch (Exception e)
+						{ 
+							MigService.Log.Warn("Could not create HomeGenie LIRC config '{0}': {1}", lircrcFile, e.Message);
+							//return false;
+						}
+					}
+					if (lirc_init(programName, 1) == -1)
                     {
                         MigService.Log.Error("Could not initialize LIRC: check LIRC installation");
                         return false;
@@ -239,21 +258,17 @@ namespace MIG.Interfaces.Controllers
                 try
                 {
                     lircListener.Abort();
-                }
-                catch
-                {
-                }
+                } catch { }
                 lircListener = null;
                 //
                 try
                 {
-                    LircFreeConfig(lircConfig);
-                    LircDeinit();
-                }
-                catch
-                {
-
-                }
+                    lirc_freeconfig(lircConfig);
+                } catch { }
+				try
+				{
+					lirc_deinit();
+				} catch { }
                 //
                 isConnected = false;
             }
@@ -322,8 +337,8 @@ namespace MIG.Interfaces.Controllers
 
         public LircRemote()
         {
+			assemblyFolder = MigService.GetAssemblyDirectory(this.GetType().Assembly);
             // lirc client lib symlink
-            string assemblyFolder = MigService.GetAssemblyDirectory(this.GetType().Assembly);
             var liblirclink = Path.Combine(assemblyFolder, "liblirc_client.so");
             if (File.Exists("/usr/lib/liblirc_client.so") && !File.Exists(liblirclink))
             {
@@ -332,22 +347,6 @@ namespace MIG.Interfaces.Controllers
             else if (File.Exists("/usr/lib/liblirc_client.so.0") && !File.Exists(liblirclink))
             {
                 MigService.ShellCommand("ln", " -s \"/usr/lib/liblirc_client.so.0\" \"" + liblirclink + "\"");
-            }
-            // create .lircrc file
-            var lircrcFile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Personal), ".lircrc");
-            if (!File.Exists(lircrcFile))
-            {
-                var lircrc = "begin\n" +
-                    "        prog = homegenie\n" +
-                    "        button = KEY_1\n" +
-                    "        repeat = 3\n" +
-                    "        config = KEY_1\n" +
-                    "end\n";
-                try
-                {
-                    File.WriteAllText(lircrcFile, lircrc);
-                }
-                catch { }
             }
             //
             remotesConfig = new List<LircRemoteData>();
@@ -401,7 +400,7 @@ namespace MIG.Interfaces.Controllers
 
         private void SaveConfig()
         {
-            string fileName = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lircconfig.xml");
+			string fileName = Path.Combine(assemblyFolder, "lircconfig.xml");
             if (File.Exists(fileName))
             {
                 File.Delete(fileName);
